@@ -60,7 +60,8 @@ class Maze(object):
     starting_col = 0  # Starting column
     starting_row = 0  # Starting row
     difficulty = 'M'  # difficulty of maze, default to medium
-    number_cheeses = 0 # number of cheeses actually stored
+    cheeses = []  # rooms containing the cheeses
+
 
     def __init__(self):
     # Maze initialization method called when maze is created
@@ -112,12 +113,13 @@ class Maze(object):
             east_exit = p_path.random_walk(col=Maze.starting_col,row=Maze.starting_row,
                                     color=RED,room_state='P',seek_east=True)
             if east_exit:
+
                 break
             else:
                 Maze.reset(maze) # reset the array and try again
 
         room = Room.rooms[Maze.starting_col][Maze.starting_row]
-        Room.unused_rooms.remove(room)
+        Room.unused_rooms.remove(room) # show starting room is used
         p_path.rooms.insert(0,room)  # add starting room to head of rooms list
 
         Path.primary_path.append(p_path) # append the path object, only one
@@ -201,6 +203,13 @@ class Maze(object):
         room = Room.rooms[Maze.starting_col][Maze.starting_row]
         room.room_color = WHITE
         room.draw()
+
+
+        # Redraw the ending room in green
+        last_room = p_path.rooms[len(p_path.rooms)-1]
+        print(last_room.col,last_room.row)
+        last_room.room_color = GREEN
+        last_room.draw()
         pygame.display.update()
         
         # return from Maze.build
@@ -216,11 +225,8 @@ class Maze(object):
                 room.room_color = BACKGROUND
                 room.state = None;
                 room.contents = []  # reset to no contents
-                #initialize the state of the walls, True means they are up
-                room.n_wall = True
-                room.s_wall = True
-                room.e_wall = True
-                room.w_wall = True
+                #initialize the state of the walls
+                room.walls = ['N','S','E','W']
                 room.draw()
 
         return # return from Maze.reset
@@ -245,10 +251,11 @@ class Maze(object):
             room = path.rooms[len(path.rooms)-1]
             room.room_color = GOLD
             room.contents.append('cheese')
+            Maze.cheeses.append(room)  # add room to list containing cheese
             room.draw()
             num_stored += 1
             pygame.display.update()
-        self.number_cheeses = num_stored   # Save the number actually stored
+        
         return  # return from store cheeese
 
 #------------------- Path Class ----------------------------------------
@@ -276,13 +283,15 @@ class Path(object):
                     seek_east=False):
     # Function to do a random walk
 #        self.rooms.append(Room.rooms[col][row])
+        rewind_depth = 0 # initialize the depth of rewind
         while True:
             old_col = col
             old_row = row
+            bail_out = False
             # try a random direction out and see if we can move there
             possible_directions=['N','S','E','W']
             if seek_east:
-               possible_directions=['N','N','S','S','E','E','E','W']            
+               possible_directions=['N','N','S','S','E','E','W']            
             if seek_east:
                 if (row == 0) |(row >= Maze.rooms_V-1): # don't loop back if N or S
                     possible_directions.remove('W')
@@ -294,6 +303,7 @@ class Path(object):
     #           print(try_index,col,row,possible_directions)       
                 direction = possible_directions[try_index]
                 del possible_directions[try_index]
+               
                 status,col,row = Room.walk(room,
                                            direction=direction,wall_check=False)
     #           print('Room state is ',Room.rooms[col][row].state)
@@ -302,25 +312,66 @@ class Path(object):
                     col = old_col  # room was busy, back out
                     row = old_row
                     if len(possible_directions) <= 0: # we are stuck
-                        return False     # return no east exit
+                        if (room_state == 'P'): # stuck, if primary, rewind and try again
+                            #print('Stuck on primary path')
+                            #  back out several rooms and try again
+                            rewind_depth += 1 # rewind farther each time stuck
+                            rewind = rewind_depth  # set the maximum number of rewind rooms
+                            while ( (rewind > 0) and (len(self.rooms) > 1) ):
+                                #print('rewind =', rewind)
+                                last_room = self.rooms[len(self.rooms)-1]
+                                entry_direction = last_room.entry_direction # remember before wiping out
+                                last_room.entry_direction = []
+                                last_room.room_color = BACKGROUND # mark old room at end of path as unusued
+                                last_room.state = None
+                                last_room.walls = ['N','S','E','W'] # restore its walls
+                                self.rooms.remove(last_room) # take it out of the path
+                                Room.unused_rooms.append(last_room) # put it back unused
+                               # restore the wall entered from in the previous room
+                                room = self.rooms[len(self.rooms)-1]
+                                room.walls.append(entry_direction)
+                                col =room.col
+                                row = room.row
+                                last_room.draw()
+                                pygame.display.update()
+                                time.sleep(.1)
+                                                               
+                                rewind = rewind - 1 # count down rewinding room
+                                bail_out = True
+                            
+                            pygame.display.update()
+                            if (bail_out):
+                                break
+                        else: # stuck not on primary path
+                            return False
+
                     
                 else:  # room seems OK to add to the walk
 
                    # get the object for this room and change its color as indicated
-                    old_room = Room.rooms[old_col][old_row]  # remember old room to knock down its walls
+
+                    if (len(self.rooms) > 0 ): # remember old room to knock down walls
+                        old_room = self.rooms[len(self.rooms)-1]
+                    else:
+                        old_room = Room.rooms[old_col][old_row] # special case for first room
                     room = Room.rooms[col][row]
                     self.rooms.append(room)
+                    room.entry_direction = direction
                     room.room_color = color
                     room.state = room_state  # indicate room is used
                     Room.unused_rooms.remove(room)  # delete from unusued rooms
                     # knock down the wall in old and new room.
-                    Room.knock_out_walls(direction,room,old_room)    
+                    Room.knock_out_walls(direction,room,old_room)
+                    room.draw()
+                    pygame.display.update()
                     
                     if seek_east and (col == Maze.rooms_H-1):
 
                         return True # we found an east exit
                     else:
                         break
+                if (bail_out):
+                    break
     #        time.sleep(.1)
                  
 
@@ -464,12 +515,15 @@ class Room(object):
         self.state = None   # usage state of the room
         self.contents = [] # contents list to empty
 
-        #initialize the state of the walls, True means they are up
-        self.n_wall = True
-        self.s_wall = True
-        self.e_wall = True
-        self.w_wall = True
-
+        #initialize the state of the walls. If they are in the list they are up.
+        self.walls = ['N','S','E','W']
+        # remember the direction you were going when you entered the room
+        self.entry_direction = []
+        #Remember the way you came in, opposite from the direction from the last room
+        self.way_out = []
+        #Remember all the directions you have explored
+        self.explored = []
+        
         #define a rectangle for this room and save it
         left = int(float((WINDOWWIDTH-MAZE_WIDTH)/2.)
                    +int(self.col*float(size)))
@@ -487,19 +541,19 @@ class Room(object):
         pygame.draw.rect(windowSurface,self.room_color,self.rect,0) # draw the floor
 
         #draw the walls based on their state
-        if self.n_wall:
+        if self.walls.count('N') > 0:
             pygame.draw.line(windowSurface,self.wall_color,
                              (self.rect.left,self.rect.top),
                              (self.rect.left+self.size,self.rect.top),1)
-        if self.s_wall:
+        if self.walls.count('S') > 0:
            pygame.draw.line(windowSurface,self.wall_color,
                              (self.rect.left,self.rect.bottom),
                              (self.rect.left+self.size,self.rect.bottom),1)
-        if self.w_wall:
+        if self.walls.count('W') > 0:
            pygame.draw.line(windowSurface,self.wall_color,
                  (self.rect.left,self.rect.top),
                  (self.rect.left,self.rect.top+self.size),1)
-        if self.e_wall:
+        if self.walls.count('E') > 0:
            pygame.draw.line(windowSurface,self.wall_color,
                              (self.rect.right,self.rect.top),
                              (self.rect.right,self.rect.top+self.size),1)
@@ -520,26 +574,25 @@ class Room(object):
         row = self.row
         if ( (direction == 'N') &
              (self.row >0) ):
-            if( (not self.n_wall) |  (not wall_check)):
+            if( (self.walls.count('N') == 0) |  (not wall_check)):
                  row -=1
                  moved = True
         if ( (direction == 'S') &
              (self.row < (Maze.rooms_V-1) ) ):
-            if( (not self.s_wall) |  (not wall_check)):
+            if( (self.walls.count('S') == 0) |  (not wall_check)):
                  row +=1
                  moved = True
         if ( (direction == 'W') &
              (self.col >0) ):
-            if( (not self.w_wall) |  (not wall_check)):
+            if( (self.walls.count('W') == 0) |  (not wall_check)):
                  col -=1
                  moved = True
         if ( (direction == 'E') &
              (self.col < (Maze.rooms_H-1) ) ):
-            if( (not self.e_wall) |  (not wall_check)):
+            if( (self.walls.count('E') == 0) |  (not wall_check)):
                  col +=1
                  moved = True
-#        print('dir,N,S,E,W= ',direction,self.n_wall,self.s_wall,
-#              self.e_wall,self.w_wall)
+#        print('dir,N,S,E,W= ',direction,self.walls)
 
         return moved,col,row  # returned with indication of success or failure
 
@@ -550,17 +603,17 @@ class Room(object):
  
 
         if direction == 'N':
-            old_room.n_wall = False
-            room.s_wall = False
+            old_room.walls.remove('N')
+            room.walls.remove('S')
         elif direction == 'S':
-            old_room.s_wall = False
-            room.n_wall = False
+            old_room.walls.remove('S')
+            room.walls.remove('N')
         elif direction == 'E':
-            old_room.e_wall = False
-            room.w_wall = False
+            old_room.walls.remove('E')
+            room.walls.remove('W')                              
         elif direction == 'W':
-            old_room.w_wall = False
-            room.e_wall = False
+            old_room.walls.remove('W')
+            room.walls.remove('E')
         Room.draw(old_room) # redraw both rooms
         Room.draw(room)
 
@@ -615,8 +668,9 @@ class Rat(object):  # create Rat object
     # see if there is cheese in room, if so, pick up cheese, change room color
     # to background and return true
         if 'cheese' in room.contents:
-            self.cheeses.append('cheese')
-            room.contents.remove('cheese')
+            self.cheeses.append('cheese')  # add to the stuff we carry
+            room.contents.remove('cheese')  # remove from the room
+            Maze.cheeses.remove(room) # remove room from master list of cheeses
             room.room_color = BACKGROUND
             self.room.draw() # redraw room with no cheese
             return True
@@ -630,6 +684,84 @@ class Rat(object):  # create Rat object
     def change_color(self,color_n):
         self.color = color_n
         self.draw()
+
+#------------------------------------------------------------------
+# Robot_Rat class
+# This dumb robot rat basically does a random walk with a bit of a
+# refinement that causes him to prefer rooms that he hasn't been in
+# before.
+#------------------------------------------------------------------
+
+class Robot_Rat(Rat):  # create Rat object
+
+    def __init__(self,direction = 'E',color=DIMGREY ):
+
+        Rat.__init__(self,direction,color) # use the parent class init for basics
+
+        return
+
+    def auto_move(self):
+
+         possible_directions=['E','S','N','W']
+         #print ('walls =', self.room.walls)
+         for direction in self.room.walls:
+             possible_directions.remove(direction)
+         for direction in self.room.explored:
+             possible_directions.remove(direction)
+         #print('Way out =',self.room.way_out)
+         if (len(self.room.way_out) != 0):        
+             possible_directions.remove(self.room.way_out) # don't explore the way you came
+         #print(possible_directions)
+
+
+          
+
+         while  len(possible_directions) > 0 :
+            if (possible_directions.count('E') > 0): # Seek east if possible
+                direction = 'E'
+                possible_directions.remove('E')
+            else:
+                try_index = random.randrange(0,len(possible_directions))
+                direction = possible_directions[try_index]
+                del possible_directions[try_index]
+            #print(try_index,self.room.col,self.room.row)
+            old_room = self.room
+            status = self.move(direction=direction)
+            #print('status',status,self.room.col, self.room.row)
+            if ( status): 
+                old_room.explored.append(direction) #mark that we have gone this way
+                self.room.room_color = DIMGREY # show we have visited this room
+
+                # if this room doesn't already have a way out (indicating the first
+                # entrance, mark the way out.
+                if ( len(self.room.way_out) == 0):
+                     self.room.way_out = self.opposite_direction(direction)
+                     
+                return 
+                
+
+         # couldn't find a fresh exit, go back the way you came
+
+         self.move(direction = self.room.way_out)
+         return
+        
+
+    def opposite_direction(self,direction):  # return the direction opposite to that specified
+
+        directions = ['N','S','E','W']
+        opposite = ['S','N','W','E']
+
+        index = directions.index(direction)
+
+        return opposite[index]
+        
+                     
+
+
+
+        
+
+
 #------------------------------------------------------------------
 # Define the widget classes
 #------------------------------------------------------------------
@@ -1198,14 +1330,14 @@ maze.build()  # Build maze with medium difficulty default
 
 maze.store_cheese()
 
-rat = Rat(color=RED)
+rat = Robot_Rat(color=RED)
 #Which player has gone
 player1_loop = False
 player2_loop = False
 high_score1 = 10000000
 high_score2 = 10000000
 global start
-start = False
+start =     True
 #Varible to tell when the user has clicked the go button
               #I would like to have put this inside the init function for the widgets, however that makes it a local var :(
 #  Main game loop, runs until window x'd out or someone wins
@@ -1253,7 +1385,7 @@ while True:
                     if widget_object.isclicked(pos): #isclicked, to see if something is clicked.
 
                         widget_object.handler()#Well, its clicked, so do the self.handler()
-    if player1_loop == False: #If player 1 is going
+    '''if player1_loop == False: #If player 1 is going
         if ( (rat.cheese_num() >= maze.number_cheeses) &
          (rat.room == Room.rooms[Maze.starting_col][Maze.starting_row]) ): #wait untill they have all the cheese and are at the begginiing
             start = False
@@ -1284,10 +1416,12 @@ while True:
             go.toggle()
             player1.toggle()
             player2.toggle()
-            rat.change_color(RED)
+            rat.change_color(RED)'''
+    rat.auto_move()
     Timer.process()
     pygame.display.update()
-    time.sleep(.02)
+    time.sleep(.1)
+    
 
 
 sys.exit() # shouldn't ever get here.  Exit is in main loop.
